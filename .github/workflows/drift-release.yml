@@ -187,8 +187,7 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
+        # Use package.json packageManager (pnpm@12.5.1); do not pin version here
 
       - name: pnpm install + prebuild (keeps existing Drift sidecars)
         run: |
