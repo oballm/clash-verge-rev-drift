@@ -146,7 +146,8 @@ jobs:
             Drift shell build (unsigned, full platform matrix).
 
             - Platforms: Windows amd64/arm64, macOS amd64/arm64, Linux amd64/arm64/armv7
-            - Unsigned (no Tauri/macOS/Windows signing); no fixed-webview2 variants
+            - Unsigned (no Tauri/macOS/Windows signing)
+            - Includes fixed-WebView2 Windows variants (x64/arm64) when built
             - Sidecar: private `oballm/mihomo-drift` @ `${{ env.MIHOMO_REF }}`
             - App updater disabled; upstream promo header links removed
             - Built by `drift-release.yml`
@@ -393,3 +394,132 @@ jobs:
             target/${{ matrix.target }}/release/bundle/deb/*.deb
             target/${{ matrix.target }}/release/bundle/rpm/*.rpm
           if-no-files-found: warn
+
+  build-verge-fixed-webview2:
+    name: Build Verge Fixed WebView2 (${{ matrix.target }})
+    needs: [build-sidecar, prepare-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x64
+            sidecar_artifact: sidecar-windows-amd64
+            sidecar_file: verge-mihomo-x86_64-pc-windows-msvc.exe
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            arch: arm64
+            sidecar_artifact: sidecar-windows-arm64
+            sidecar_file: verge-mihomo-aarch64-pc-windows-msvc.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Verge
+        uses: actions/checkout@v4
+
+      - name: Download Drift sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.sidecar_artifact }}
+          path: sidecar-in
+
+      - name: Stage sidecars (skip Meta download later)
+        shell: bash
+        run: |
+          mkdir -p src-tauri/sidecar
+          src="sidecar-in/${{ matrix.sidecar_file }}"
+          dst="src-tauri/sidecar/${{ matrix.sidecar_file }}"
+          cp -f "$src" "$dst"
+          # alpha slot: same Drift binary for now
+          alpha="${dst/verge-mihomo-/verge-mihomo-alpha-}"
+          cp -f "$src" "$alpha"
+          ls -lh src-tauri/sidecar/
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1"
+          targets: ${{ matrix.target }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # Use package.json packageManager (pnpm@12.5.1); do not pin version here
+
+      - name: pnpm install + prebuild (keeps existing Drift sidecars)
+        run: |
+          pnpm i
+          pnpm run prebuild ${{ matrix.target }}
+
+      - name: Download WebView2 Runtime
+        shell: pwsh
+        run: |
+          invoke-webrequest -uri https://github.com/westinyang/WebView2RuntimeArchive/releases/download/133.0.3065.92/Microsoft.WebView2.FixedVersionRuntime.133.0.3065.92.${{ matrix.arch }}.cab -outfile Microsoft.WebView2.FixedVersionRuntime.133.0.3065.92.${{ matrix.arch }}.cab
+          Expand .\Microsoft.WebView2.FixedVersionRuntime.133.0.3065.92.${{ matrix.arch }}.cab -F:* ./src-tauri
+          Remove-Item .\src-tauri\tauri.windows.conf.json
+          Rename-Item .\src-tauri\webview2.${{ matrix.arch }}.json tauri.windows.conf.json
+
+      - name: Tauri build (unsigned, fixed WebView2)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_OPTIONS: --max_old_space_size=4096
+        with:
+          # Prefer not attaching via tagName; upload renamed fixed_* files with gh below
+          tagName: ""
+          releaseName: Clash Verge Drift ${{ needs.prepare-release.outputs.tag }}
+          releaseBody: Drift unsigned fixed-WebView2 build
+          releaseDraft: false
+          prerelease: false
+          tauriScript: pnpm
+          args: --target ${{ matrix.target }} --no-sign
+          includeUpdaterJson: false
+
+      - name: Rename NSIS outputs to fixed_webview2
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem ".\target\${{ matrix.target }}\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue
+          foreach ($file in $files) {
+            $newName = $file.Name -replace "-setup\.exe$", "_fixed_webview2-setup.exe"
+            Rename-Item $file.FullName $newName
+          }
+
+          $files = Get-ChildItem ".\target\${{ matrix.target }}\release\bundle\nsis\*.nsis.zip" -ErrorAction SilentlyContinue
+          foreach ($file in $files) {
+            $newName = $file.Name -replace "-setup\.nsis\.zip$", "_fixed_webview2-setup.nsis.zip"
+            Rename-Item $file.FullName $newName
+          }
+
+          $files = Get-ChildItem ".\target\${{ matrix.target }}\release\bundle\nsis\*-setup.exe.sig" -ErrorAction SilentlyContinue
+          foreach ($file in $files) {
+            $newName = $file.Name -replace "-setup\.exe\.sig$", "_fixed_webview2-setup.exe.sig"
+            Rename-Item $file.FullName $newName
+          }
+
+          Get-ChildItem ".\target\${{ matrix.target }}\release\bundle\nsis\*fixed_webview2*" | Format-Table Name, Length
+
+      - name: Upload fixed WebView2 artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: verge-${{ matrix.target }}-fixed-webview2
+          path: |
+            target/${{ matrix.target }}/release/bundle/nsis/*fixed_webview2*
+          if-no-files-found: warn
+
+      - name: Upload fixed WebView2 release assets
+        if: needs.prepare-release.outputs.do_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = Get-ChildItem "target\${{ matrix.target }}\release\bundle\nsis\*fixed_webview2*" | Select-Object -ExpandProperty FullName
+          if (-not $files) {
+            Write-Error "No fixed_webview2 NSIS files found to upload"
+            exit 1
+          }
+          gh release upload "${{ needs.prepare-release.outputs.tag }}" $files --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
