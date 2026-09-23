@@ -23,7 +23,10 @@ export const useUpdate = (enabled: boolean = true) => {
   const { verge } = useVerge()
   const { auto_check_update } = verge || {}
 
-  const shouldCheck = enabled && auto_check_update !== false
+  // Drift fork: never auto-query app updates (checkUpdateSafe is also hard-disabled)
+  const shouldCheck = false
+  void enabled
+  void auto_check_update
 
   const fetchUpdate = async () => {
     const result = await checkUpdateSafe()

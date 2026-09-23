@@ -14,11 +14,7 @@ import { useNavigate } from 'react-router'
 
 import { useServiceInstaller } from '@/hooks/use-service-installer'
 import { useSystemState } from '@/hooks/use-system-state'
-import {
-  useUpdate,
-  updateLastCheckTime,
-  readLastCheckTime,
-} from '@/hooks/use-update'
+import { useUpdate } from '@/hooks/use-update'
 import { useVerge } from '@/hooks/use-verge'
 import { getSystemInfo } from '@/services/cmds'
 import { showNotice } from '@/services/notice-service'
@@ -34,7 +30,7 @@ export const SystemInfoCard = () => {
     useSystemState()
   const { installServiceAndRestartCore } = useServiceInstaller()
 
-  const { checkUpdate: triggerCheckUpdate, lastCheckUpdate } = useUpdate(true)
+  const { lastCheckUpdate } = useUpdate(false)
 
   const [osInfo, setOsInfo] = useState('')
 
@@ -60,17 +56,6 @@ export const SystemInfoCard = () => {
       })
       .catch(console.error)
   }, [])
-
-  useEffect(() => {
-    if (!verge?.auto_check_update) return
-    if (readLastCheckTime() !== null) return
-
-    updateLastCheckTime()
-    const timeoutId = window.setTimeout(() => {
-      triggerCheckUpdate().catch(console.error)
-    }, 5000)
-    return () => window.clearTimeout(timeoutId)
-  }, [verge?.auto_check_update, triggerCheckUpdate])
 
   const goToSettings = useCallback(() => {
     navigate('/settings')
@@ -98,21 +83,10 @@ export const SystemInfoCard = () => {
   ])
 
   const onCheckUpdate = useLockFn(async () => {
-    try {
-      const result = await triggerCheckUpdate()
-      const info = result.data
-      if (!info?.available) {
-        showNotice.success(
-          'settings.components.verge.advanced.notifications.latestVersion',
-        )
-      } else {
-        showNotice.info('shared.feedback.notifications.updateAvailable', 2000)
-        goToSettings()
-      }
-    } catch (err) {
-      console.warn('update check failed:', err)
-      showNotice.warning(err)
-    }
+    // Drift fork: app updater disabled
+    showNotice.info(
+      'Drift 定制版不支持应用内更新 / This Drift build does not support in-app updates',
+    )
   })
 
   const autoLaunchEnabled = useMemo(

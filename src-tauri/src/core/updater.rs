@@ -149,7 +149,10 @@ fn nsis_language_id(app_language: &str) -> &'static str {
 
 impl SilentUpdater {
     /// Installs a newer cached update before normal startup, if the user confirms.
+    #[allow(unreachable_code, unused_variables)]
     pub async fn try_install_on_startup(&self, app_handle: &tauri::AppHandle) -> bool {
+        // Drift fork: app updater disabled
+        return false;
         let current_version = env!("CARGO_PKG_VERSION");
 
         let meta = match Self::read_cache_meta() {
@@ -409,8 +412,12 @@ impl SilentUpdater {
 }
 
 impl SilentUpdater {
+    #[allow(unreachable_code, unused_variables)]
     async fn check_and_download(&self, app_handle: &tauri::AppHandle) -> Result<()> {
-        let auto_check = Config::verge().await.latest_arc().auto_check_update.unwrap_or(true);
+        // Drift fork: app updater disabled — skip check+download+notify even if auto_check_update is true
+        logging!(info, Type::System, "Silent updater: Drift fork hard-disabled; skipping");
+        return Ok(());
+        let auto_check = Config::verge().await.latest_arc().auto_check_update.unwrap_or(false);
         if !auto_check {
             logging!(debug, Type::System, "Silent update skipped: auto_check_update is false");
             return Ok(());
@@ -487,7 +494,15 @@ impl SilentUpdater {
         Ok(())
     }
 
+    #[allow(unreachable_code, unused_variables)]
     pub async fn start_background_check(&self, app_handle: tauri::AppHandle) {
+        // Drift fork: app updater disabled — do not start silent update cycles
+        logging!(
+            info,
+            Type::System,
+            "Silent updater: Drift fork hard-disabled; background check not started"
+        );
+        return;
         logging!(info, Type::System, "Silent updater: background task started");
 
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
