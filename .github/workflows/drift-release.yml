@@ -35,18 +35,41 @@ env:
 
 jobs:
   build-sidecar:
-    name: Build Drift sidecar (${{ matrix.goos }}-${{ matrix.goarch }})
+    name: Build Drift sidecar (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: windows
+          - name: windows-amd64
+            goos: windows
             goarch: amd64
             artifact: verge-mihomo-x86_64-pc-windows-msvc.exe
-          - goos: linux
+          - name: windows-arm64
+            goos: windows
+            goarch: arm64
+            artifact: verge-mihomo-aarch64-pc-windows-msvc.exe
+          - name: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            artifact: verge-mihomo-x86_64-apple-darwin
+          - name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            artifact: verge-mihomo-aarch64-apple-darwin
+          - name: linux-amd64
+            goos: linux
             goarch: amd64
             artifact: verge-mihomo-x86_64-unknown-linux-gnu
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+            artifact: verge-mihomo-aarch64-unknown-linux-gnu
+          - name: linux-arm-v7
+            goos: linux
+            goarch: arm
+            goarm: "7"
+            artifact: verge-mihomo-armv7-unknown-linux-gnueabihf
     steps:
       - name: Checkout mihomo-drift
         uses: actions/checkout@v4
@@ -77,6 +100,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: "0"
         run: |
           out="../${{ matrix.artifact }}"
@@ -86,7 +110,7 @@ jobs:
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sidecar-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: sidecar-${{ matrix.name }}
           path: ${{ matrix.artifact }}
           if-no-files-found: error
 
@@ -119,8 +143,10 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: Clash Verge Drift ${{ steps.meta.outputs.tag }}
           body: |
-            Drift shell build (unsigned).
+            Drift shell build (unsigned, full platform matrix).
 
+            - Platforms: Windows amd64/arm64, macOS amd64/arm64, Linux amd64/arm64/armv7
+            - Unsigned (no Tauri/macOS/Windows signing); no fixed-webview2 variants
             - Sidecar: private `oballm/mihomo-drift` @ `${{ env.MIHOMO_REF }}`
             - App updater disabled; upstream promo header links removed
             - Built by `drift-release.yml`
@@ -141,6 +167,18 @@ jobs:
             target: x86_64-pc-windows-msvc
             sidecar_artifact: sidecar-windows-amd64
             sidecar_file: verge-mihomo-x86_64-pc-windows-msvc.exe
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            sidecar_artifact: sidecar-windows-arm64
+            sidecar_file: verge-mihomo-aarch64-pc-windows-msvc.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            sidecar_artifact: sidecar-darwin-amd64
+            sidecar_file: verge-mihomo-x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            sidecar_artifact: sidecar-darwin-arm64
+            sidecar_file: verge-mihomo-aarch64-apple-darwin
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             sidecar_artifact: sidecar-linux-amd64
@@ -202,7 +240,7 @@ jobs:
         with:
           tagName: ${{ needs.prepare-release.outputs.do_release == 'true' && needs.prepare-release.outputs.tag || '' }}
           releaseName: Clash Verge Drift ${{ needs.prepare-release.outputs.tag }}
-          releaseBody: Drift unsigned build
+          releaseBody: Drift unsigned full-matrix build
           releaseDraft: false
           prerelease: false
           tauriScript: pnpm
@@ -215,7 +253,143 @@ jobs:
           name: verge-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/bundle/nsis/*setup*
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
             target/${{ matrix.target }}/release/bundle/deb/*.deb
             target/${{ matrix.target }}/release/bundle/rpm/*.rpm
-            target/${{ matrix.target }}/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+  build-verge-linux-arm:
+    name: Build Verge Linux ARM (${{ matrix.target }})
+    needs: [build-sidecar, prepare-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            arch: arm64
+            sidecar_artifact: sidecar-linux-arm64
+            sidecar_file: verge-mihomo-aarch64-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: armv7-unknown-linux-gnueabihf
+            arch: armhf
+            sidecar_artifact: sidecar-linux-arm-v7
+            sidecar_file: verge-mihomo-armv7-unknown-linux-gnueabihf
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Verge
+        uses: actions/checkout@v4
+
+      - name: Download Drift sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.sidecar_artifact }}
+          path: sidecar-in
+
+      - name: Stage sidecars (skip Meta download later)
+        shell: bash
+        run: |
+          mkdir -p src-tauri/sidecar
+          src="sidecar-in/${{ matrix.sidecar_file }}"
+          dst="src-tauri/sidecar/${{ matrix.sidecar_file }}"
+          cp -f "$src" "$dst"
+          alpha="${dst/verge-mihomo-/verge-mihomo-alpha-}"
+          cp -f "$src" "$alpha"
+          ls -lh src-tauri/sidecar/
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1"
+          targets: ${{ matrix.target }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # Use package.json packageManager (pnpm@12.5.1); do not pin version here
+
+      - name: pnpm install + prebuild (keeps existing Drift sidecars)
+        run: |
+          pnpm i
+          pnpm run prebuild ${{ matrix.target }}
+
+      - name: Setup for linux cross
+        run: |-
+          cat > /tmp/sources.list << 'SOURCES'
+          deb [arch=amd64,i386] http://archive.ubuntu.com/ubuntu jammy main multiverse universe restricted
+          deb [arch=amd64,i386] http://archive.ubuntu.com/ubuntu jammy-security main multiverse universe restricted
+          deb [arch=amd64,i386] http://archive.ubuntu.com/ubuntu jammy-updates main multiverse universe restricted
+          deb [arch=amd64,i386] http://archive.ubuntu.com/ubuntu jammy-backports main multiverse universe restricted
+
+          deb [arch=armhf,arm64] http://ports.ubuntu.com/ubuntu-ports jammy main multiverse universe restricted
+          deb [arch=armhf,arm64] http://ports.ubuntu.com/ubuntu-ports jammy-security main multiverse universe restricted
+          deb [arch=armhf,arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main multiverse universe restricted
+          deb [arch=armhf,arm64] http://ports.ubuntu.com/ubuntu-ports jammy-backports main multiverse universe restricted
+          SOURCES
+
+          sudo mv /etc/apt/sources.list /etc/apt/sources.list.default
+          sudo mv /tmp/sources.list /etc/apt/sources.list
+
+          sudo dpkg --add-architecture ${{ matrix.arch }}
+          sudo apt update
+
+          sudo apt install -y \
+            libxslt1.1:${{ matrix.arch }} \
+            libwebkit2gtk-4.1-dev:${{ matrix.arch }} \
+            libayatana-appindicator3-dev:${{ matrix.arch }} \
+            libssl-dev:${{ matrix.arch }} \
+            patchelf:${{ matrix.arch }} \
+            librsvg2-dev:${{ matrix.arch }}
+
+      - name: Install aarch64 tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
+
+      - name: Install armv7 tools
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          sudo apt install -y \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf
+
+      - name: Tauri build Linux ARM (unsigned)
+        run: |
+          export PKG_CONFIG_ALLOW_CROSS=1
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/:$PKG_CONFIG_PATH
+            export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu/
+          elif [ "${{ matrix.target }}" = "armv7-unknown-linux-gnueabihf" ]; then
+            export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig/:$PKG_CONFIG_PATH
+            export PKG_CONFIG_SYSROOT_DIR=/usr/arm-linux-gnueabihf/
+          fi
+          pnpm build --target ${{ matrix.target }} --no-sign
+        env:
+          NODE_OPTIONS: --max_old_space_size=4096
+
+      - name: Upload release assets
+        if: needs.prepare-release.outputs.do_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.prepare-release.outputs.tag }}" \
+            target/${{ matrix.target }}/release/bundle/deb/*.deb \
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm \
+            --clobber
+
+      - name: Upload bundle artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: verge-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm
           if-no-files-found: warn
