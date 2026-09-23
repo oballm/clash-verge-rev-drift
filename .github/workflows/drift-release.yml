@@ -136,26 +136,56 @@ jobs:
           echo "do_release=$DO" >> "$GITHUB_OUTPUT"
           echo "Release tag=$TAG do_release=$DO"
 
-      - name: Create or update release
+      # GITHUB_TOKEN may not update/upload to releases created outside Actions.
+      # Prefer PRIVATE_REPO_TOKEN (write) when present for create/upload.
+      - name: Ensure GitHub Release exists
         if: steps.meta.outputs.do_release == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: Clash Verge Drift ${{ steps.meta.outputs.tag }}
-          body: |
-            Drift shell build (unsigned, full platform matrix).
-
-            - Platforms: Windows amd64/arm64, macOS amd64/arm64, Linux amd64/arm64/armv7
-            - Unsigned (no Tauri/macOS/Windows signing)
-            - Includes fixed-WebView2 Windows variants (x64/arm64) when built
-            - Sidecar: private `oballm/mihomo-drift` @ `${{ env.MIHOMO_REF }}`
-            - App updater disabled; upstream promo header links removed
-            - Built by `drift-release.yml`
-          draft: false
-          prerelease: false
-          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          MIHOMO_REF: ${{ env.MIHOMO_REF }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES=$(cat <<EOF
+          Drift shell build (unsigned, full platform matrix).
+
+          - Platforms: Windows amd64/arm64, macOS amd64/arm64, Linux amd64/arm64/armv7
+          - Unsigned (no Tauri/macOS/Windows signing)
+          - Includes fixed-WebView2 Windows variants (x64/arm64) when built
+          - Sidecar: private \`oballm/mihomo-drift\` @ \`${MIHOMO_REF}\`
+          - App updater disabled; upstream promo header links removed
+          - Built by \`drift-release.yml\`
+          EOF
+          )
+          # Drop common leading spaces from the indented heredoc body
+          NOTES=$(printf '%s\n' "$NOTES" | sed 's/^[[:space:]]*//')
+
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving metadata unchanged (no softprops update)."
+            exit 0
+          fi
+
+          echo "Creating release $TAG ..."
+          create_release() {
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Clash Verge Drift $TAG" \
+              --notes "$NOTES"
+          }
+
+          if create_release; then
+            echo "Created release with GITHUB_TOKEN"
+            exit 0
+          fi
+
+          echo "Create with GITHUB_TOKEN failed; retrying with PRIVATE_REPO_TOKEN ..."
+          export GH_TOKEN="${{ secrets.PRIVATE_REPO_TOKEN }}"
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::Release create failed and PRIVATE_REPO_TOKEN is empty"
+            exit 1
+          fi
+          create_release
+          echo "Created release with PRIVATE_REPO_TOKEN"
 
   build-verge:
     name: Build Verge (${{ matrix.target }})
@@ -239,7 +269,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_OPTIONS: --max_old_space_size=4096
         with:
-          tagName: ${{ needs.prepare-release.outputs.do_release == 'true' && needs.prepare-release.outputs.tag || '' }}
+          # Always empty: avoid tauri-action release API (GITHUB_TOKEN cannot update releases created outside Actions)
+          tagName: ''
           releaseName: Clash Verge Drift ${{ needs.prepare-release.outputs.tag }}
           releaseBody: Drift unsigned full-matrix build
           releaseDraft: false
@@ -379,7 +410,8 @@ jobs:
       - name: Upload release assets
         if: needs.prepare-release.outputs.do_release == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer PRIVATE_REPO_TOKEN: GITHUB_TOKEN may not upload to releases created outside Actions
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ needs.prepare-release.outputs.tag }}" \
             target/${{ matrix.target }}/release/bundle/deb/*.deb \
@@ -514,7 +546,8 @@ jobs:
         if: needs.prepare-release.outputs.do_release == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer PRIVATE_REPO_TOKEN: GITHUB_TOKEN may not upload to releases created outside Actions
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           $files = Get-ChildItem "target\${{ matrix.target }}\release\bundle\nsis\*fixed_webview2*" | Select-Object -ExpandProperty FullName
           if (-not $files) {
