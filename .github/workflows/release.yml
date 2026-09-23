@@ -1,10 +1,9 @@
 name: Release Build
 
 on:
-  push:
-    # -rc tag 时预览发布, 跳过 telegram 通知、跳过 winget 提交、跳过 latest.json 文件更新
-    tags:
-      - 'v*.*.*'
+  # Drift fork: do not auto-run upstream Release on tags.
+  # Use .github/workflows/drift-release.yml for v*-drift.* publishes.
+  workflow_dispatch:
 permissions: write-all
 env:
   CARGO_INCREMENTAL: 0
