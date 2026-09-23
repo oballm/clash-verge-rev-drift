@@ -901,6 +901,7 @@ export const GroupsEditorViewer = (props: Props) => {
                           'WireGuard',
                           'Tuic',
                           'Mieru',
+                          'Drift',
                           'Masque',
                           'AnyTLS',
                           'Sudoku',

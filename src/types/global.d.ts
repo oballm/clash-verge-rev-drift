@@ -559,6 +559,30 @@ interface IProxyMieruConfig extends IProxyBaseConfig {
   multiplexing?: MieruMultiplexing
   'handshake-mode'?: string
 }
+// drift (custom outbound; requires Drift-enabled mihomo sidecar)
+interface IProxyDriftConfig extends IProxyBaseConfig {
+  name: string
+  type: 'drift'
+  server?: string
+  port?: number
+  psk?: string
+  'server-public-key'?: string
+  uuid?: string
+  'max-pad'?: number
+  'data-pad'?: number
+  multiplex?: boolean
+  udp?: boolean
+  'disable-keepalive'?: boolean
+  'heartbeat-interval'?: number
+  'heartbeat-jitter'?: number
+  'disable-heartbeat-jitter'?: boolean
+  'ping-timeout'?: number
+  'dead-timeout'?: number
+  'idle-timeout'?: number
+  'disable-idle-timeout'?: boolean
+  'max-ping-failures'?: number
+  'max-connections'?: number
+}
 // masque
 interface IProxyMasqueConfig extends IProxyBaseConfig {
   name: string
@@ -817,6 +841,7 @@ interface IProxyConfig
     IProxyAnyTLSConfig,
     IProxyTuicConfig,
     IProxyMieruConfig,
+    IProxyDriftConfig,
     IProxyMasqueConfig,
     IProxyVlessConfig,
     IProxyVmessConfig,
@@ -847,6 +872,7 @@ interface IProxyConfig
     | 'vmess'
     | 'vless'
     | 'mieru'
+    | 'drift'
     | 'sudoku'
 }
 

@@ -1,4 +1,5 @@
 import { URI_AnyTLS } from './anytls'
+import { URI_Drift } from './drift'
 import { normalizeUriAndGetScheme } from './helpers'
 import { URI_HTTP } from './http'
 import { URI_Hysteria } from './hysteria'
@@ -21,6 +22,7 @@ const URI_PARSERS: Record<string, UriParser> = {
   vless: URI_VLESS,
   trojan: URI_Trojan,
   anytls: URI_AnyTLS,
+  drift: URI_Drift,
   hysteria2: URI_Hysteria2,
   hy2: URI_Hysteria2,
   hysteria: URI_Hysteria,

@@ -1,0 +1,30 @@
+# Clash Verge Rev — Drift sample profile (PLACEHOLDERS ONLY)
+# Fill secrets from: /workspace/mihomo-drift/examples/drift-us1.yaml
+# Requires Drift-enabled sidecar (see docs/drift/README.md)
+
+mixed-port: 17891
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+
+proxies:
+  - name: us1-drift
+    type: drift
+    server: REPLACE_SERVER
+    port: 28456
+    psk: "REPLACE_PSK_64HEX"
+    server-public-key: "REPLACE_SERVER_PUBLIC_KEY_64HEX"
+    uuid: "REPLACE_UUID"
+    max-pad: 256
+    multiplex: true
+    udp: true
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - us1-drift
+
+rules:
+  - MATCH,PROXY
